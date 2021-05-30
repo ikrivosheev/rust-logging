@@ -1,12 +1,35 @@
 use actix::*;
 use actix_web::{middleware, web, App, HttpServer};
 use clap;
+use clickhouse_rs::Pool;
 use env_logger;
+use log::error;
+use std::process;
 
-mod error;
-mod view;
 mod actors;
+mod error;
+mod model;
+mod view;
 
+async fn init_database(pool: Pool) -> bool {
+    let query = include_str!("../schema.sql");
+    let result = pool.get_handle().await;
+    let mut client = match result {
+        Ok(client) => client,
+        Err(e) => {
+            error!("Cannot connect to server: {}", e);
+            return false;
+        }
+    };
+
+    match client.execute(query).await {
+        Ok(_) => true,
+        Err(e) => {
+            error!("Cannot execute query: {}", e);
+            false
+        }
+    }
+}
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -18,7 +41,7 @@ async fn main() -> std::io::Result<()> {
                 .long("host")
                 .help("Server host")
                 .default_value("localhost")
-                .takes_value(true)
+                .takes_value(true),
         )
         .arg(
             clap::Arg::with_name("port")
@@ -26,14 +49,7 @@ async fn main() -> std::io::Result<()> {
                 .long("port")
                 .help("Server port")
                 .default_value("8000")
-                .takes_value(true)
-        )
-        .arg(
-            clap::Arg::with_name("database-login")
-                .short("l")
-                .long("database-login")
-                .help("Database user:password")
-                .takes_value(true)
+                .takes_value(true),
         )
         .arg(
             clap::Arg::with_name("database-host")
@@ -41,7 +57,7 @@ async fn main() -> std::io::Result<()> {
                 .long("database-host")
                 .help("Database host")
                 .default_value("localhost")
-                .takes_value(true)
+                .takes_value(true),
         )
         .arg(
             clap::Arg::with_name("database-port")
@@ -49,26 +65,26 @@ async fn main() -> std::io::Result<()> {
                 .long("database-port")
                 .help("Database port")
                 .default_value("9000")
-                .takes_value(true)
+                .takes_value(true),
         )
         .get_matches();
 
     let host = matches.value_of("host").unwrap();
     let port = matches.value_of("port").unwrap();
-    
-    // let url: String;
-    // let database_host = matches.value_of("database-host").unwrap();
-    // let database_port = matches.value_of("database-port").unwrap();
-    // if let Some(login) = matches.value_of("database-login") {
-        // url = format!("tcp://{}@{}:{}/logging?keepalive=10", login, database_host, database_port);
-    // }
-    // else {
-        // url = format!("tcp://{}:{}/logging?keepalive=10", database_host, database_port);
-    // }
-    let inserter = actors::Inserter::new().start();
-    
+
+    let database_host = matches.value_of("database-host").unwrap();
+    let database_port = matches.value_of("database-port").unwrap();
+    let pool = Pool::new(format!("tcp://{}:{}/logging", database_host, database_port));
+
+    if !init_database(pool.clone()).await {
+        process::exit(1);
+    }
+
+    let inserter = actors::Inserter::new(pool.clone()).start();
+
     HttpServer::new(move || {
         App::new()
+            .data(pool.clone())
             .data(inserter.clone())
             .app_data(
                 web::JsonConfig::default()

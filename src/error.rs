@@ -10,11 +10,11 @@ pub fn json_handler(err: JsonPayloadError, _: &HttpRequest) -> error::Error {
         }
         _ => HttpResponse::BadRequest().body(detail),
     };
-    error::InternalError::from_response(err, resp).into()
+    error::InternalError::from_response(err, resp.into()).into()
 }
 
 pub fn query_handler(err: QueryPayloadError, _: &HttpRequest) -> error::Error {
     let detail = err.to_string();
     let resp = HttpResponse::BadRequest().body(detail);
-    error::InternalError::from_response(err, resp).into()
+    error::InternalError::from_response(err, resp.into()).into()
 }
